@@ -1,0 +1,6 @@
+This is a fork of mplayer that is hacked for the HP Touchpad.
+
+The openGL SDL driver stuff was copied from the webOSinternals patch:
+http://git.webos-internals.org/preware/cross-compile/plain/packages/media/mplayer/mplayer-svn-r32749-webos.patch
+
+It doesn't even run yet so don't get too excited.
