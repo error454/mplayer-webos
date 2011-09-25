@@ -70,7 +70,7 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_opengles.h>
 #include <SDL/SDL_opengles_ext.h>
-#include <PDL.h>
+//#include <PDL.h>
 
 #include "osdep/keycodes.h"
 
@@ -129,7 +129,7 @@ static const vo_info_t info =
 	"OPENGL_ES YUV driver for Webos",
 	"sdlopengl",
 	"Chomper",
-	"thbhdforever@gmail.com"`
+	"thbhdforever@gmail.com"
 };
 
 
@@ -281,8 +281,8 @@ static void set_video_mode(int width, int height)
 {
 	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION,2);
-	PDL_Init(0);
-	SDL_SetVideoMode(width, height, 0, SDL_OPENGLES);
+	//PDL_Init(0);
+	SDL_SetVideoMode(0, 0, 0, SDL_OPENGLES);
 	GL_Init();
 	GL_InitTexture(width,height);
 	glUseProgram (program);
@@ -394,7 +394,7 @@ static void check_events (void)
 
 				switch(keypressed){
 					case SDLK_q: mplayer_put_key('q');
-						PDL_Quit();
+						//PDL_Quit();
 					break;
                         	        case SDLK_w: mplayer_put_key(KEY_UP);break;
                                 	case SDLK_z: mplayer_put_key(KEY_DOWN);break;
