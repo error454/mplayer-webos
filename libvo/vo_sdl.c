@@ -42,9 +42,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-/* MONITOR_ASPECT MUST BE FLOAT */
+/* define to force software-surface (video surface stored in system memory)*/
+/* define to enable surface locks, this might be needed on SMP machines */
+#undef SDL_ENABLE_LOCKS
+
 #define MONITOR_ASPECT 4.0/3.0
-#define shift_key (event.key.keysym.mod==(KMOD_LSHIFT||KMOD_RSHIFT))
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,88 +67,68 @@
 
 #include "input/input.h"
 #include "input/mouse.h"
+#include "subopt-helper.h"
 #include "mp_fifo.h"
-
 #include <SDL/SDL.h>
 #include <SDL/SDL_opengles.h>
 #include <SDL/SDL_opengles_ext.h>
-//#include <PDL.h>
 
-#include "osdep/keycodes.h"
 
-static int scale;
-static GLuint texture[3];
+int scale;
+GLuint texture = 0;
 GLushort indices[] = { 0, 1, 2, 1, 2, 3 };
+
 GLuint program;
+
+// Attribute locations
 GLint  position;
 GLint  texCoord;
-GLint sampler;
-GLint loc_tex_y;
-GLint loc_tex_u;
-GLint loc_tex_v;
+
+// Sampler location
+GLint samplerLoc;
 float vertexCoords[8];
 float scale_n[8] =
 {
-    0.8, 1,
-    -0.8, 1,
-    0.8, -1,
-    -0.8, -1
+	0.8, 1,
+	-0.8, 1,
+	0.8, -1,
+	-0.8, -1
 };
-
 float scale_1[8] =
 {
-    1, 1,
-    -1, 1,
-    1, -1,
-    -1, -1
+	1, 1,
+	-1, 1,
+	1, -1,
+	-1, -1
 };
 
 float scale_2[8] =
 {
-    1, 0.9,
-    -1, 0.9,
-    1, -0.9,
-    -1, -0.9
+	1, 0.9,
+	-1, 0.9,
+	1, -0.9,
+	-1, -0.9
 };
 
 float texCoords[] =
 {
-    0.0, 0.0,
-    0.0, 1.0,
-    1.0, 0.0,
-    1.0, 1.0
+	1.0, 0.0,
+	0.0, 0.0,
+	1.0, 1.0,
+	0.0, 1.0
 };
-
-#ifdef CONFIG_X11
-#include <X11/Xlib.h>
-#include "x11_common.h"
-#endif
-
-#include "subopt-helper.h"
 
 static const vo_info_t info =
 {
-	"OPENGL_ES YUV driver for Webos",
-	"sdlopengl",
-	"Chomper",
-	"thbhdforever@gmail.com"
+	"SDL YUV/RGB/BGR renderer (SDL v1.1.7+ only!)",
+	"sdl",
+	"Ryan C. Gordon <icculus@lokigames.com>, Felix Buenemann <atmosfear@users.sourceforge.net>",
+	""
 };
-
 
 const LIBVO_EXTERN(sdl)
 
-#include "sdl_common.h"
-//#include <SDL/SDL_syswm.h>
-
-/** Private SDL Data structure **/
-
-static struct sdl_priv_s {
-	char driver[8];
- 	int width, height;
- 	int dstwidth, dstheight;
-} sdl_priv;
-
-static int change_scale(void)
+void change_scale(void)
 {
 	switch (scale) {
 		case 0:
@@ -164,13 +146,13 @@ static int change_scale(void)
 			glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
 			scale = 1;
 			break;
-	}
-	glClear(GL_COLOR_BUFFER_BIT);
+			}
+	printf("now scale mode is %d\t\n\n",scale);
 }
 
 GLuint LoadShaderProgram(const char *p1, const char *p2)
 {
- 	GLuint vshader;
+	GLuint vshader;
 	GLuint fshader;
 	GLuint program;
 
@@ -196,120 +178,305 @@ GLuint LoadShaderProgram(const char *p1, const char *p2)
 
 void GL_Init()
 {
-    glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );  
-    glDisable(GL_DEPTH_TEST);
-    glDepthFunc( GL_ALWAYS );
-    glDisable(GL_STENCIL_TEST);
-    glDisable(GL_CULL_FACE);    
+	// setup 2D gl environment
+	
+	glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );//black background
+	
 
-    GLbyte vShaderStr[] =  
-        "attribute vec4 a_position;   \n"
-        "attribute vec2 a_texCoord;   \n"
-        "varying vec2 v_texCoord;     \n"
-        "void main()                  \n"
-        "{                            \n"
-        "   gl_Position = a_position; \n"
-        "   v_texCoord = a_texCoord;  \n"
-        "}                            \n";
-	GLbyte YUVSharder[] =
-		"precision mediump float;								\n"
-		"varying vec2 v_texCoord;								\n"
-		"uniform sampler2D Ytex, Utex, Vtex;					\n"
-		"void main(void) 										\n"
-		"{														\n"
-		"float y,u,v;											\n"
-		"float r,g,b;											\n"
-		"y = 1.1643 * (texture2D(Ytex, v_texCoord).r - 0.0625);	\n"
-		"u = texture2D(Utex, v_texCoord).r - 0.5;				\n"
-		"v = texture2D(Vtex, v_texCoord).r - 0.5;				\n"
-		"r = y  1.5958 * v;									\n"
-		"g = y - 0.39173 * u - 0.81290 * v;						\n"
-		"b = y  2.017 * u;										\n"
-		"gl_FragColor=vec4(r, g, b, 1.0);						\n"
-		"}														\n"	;
-		
-	program = LoadShaderProgram ( ( char *)vShaderStr, (char *)YUVSharder);
-    
-    position = glGetAttribLocation ( program, "a_position");
-    
-    texCoord = glGetAttribLocation ( program, "a_texCoord");
-    
-	loc_tex_y = glGetUniformLocation (program, "Ytex");
-	loc_tex_u = glGetUniformLocation (program, "Utex");
-	loc_tex_v = glGetUniformLocation (program, "Vtex");
+	glDisable(GL_DEPTH_TEST);
+	glDepthFunc( GL_ALWAYS );
+	
+	glDisable(GL_CULL_FACE);
+	
+
+	GLbyte vShaderStr[] =  
+	    "attribute vec4 a_position;   \n"
+	    "attribute vec2 a_texCoord;   \n"
+	    "varying vec2 v_texCoord;     \n"
+	    "void main()                  \n"
+	    "{                            \n"
+	    "   gl_Position = a_position; \n"
+	    "   v_texCoord = a_texCoord;  \n"
+	    "}                            \n";
+
+	GLbyte fShaderStr[] =  
+	    "precision mediump float;                            \n"
+	    "varying vec2 v_texCoord;                            \n"
+	    "uniform sampler2D s_texture;                        \n"
+	    "void main()                                         \n"
+	    "{                                                   \n"
+	    "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
+	    "}                                                   \n";
+
+	program = LoadShaderProgram(( char *)vShaderStr, (char *)fShaderStr);
+	
+
+	position = glGetAttribLocation ( program, "a_position" );
+	
+	texCoord = glGetAttribLocation ( program, "a_texCoord" );
+	
+
+	samplerLoc = glGetUniformLocation ( program, "s_texture" );
+	
 }
-
 void GL_InitTexture(int width, int height)
 {
-	glGenTextures(3, texture);
-
-    glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
+	glGenTextures(1, &texture);
 	
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);   
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );   
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );   
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width>>1, height>>1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
-		
-	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, 2);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width>>1, height>>1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL );
 }
 
-static void set_video_mode(int width, int height);
+
+/** Private SDL Data structure **/
+
+static struct sdl_priv_s {
+
+	/* output driver used by sdl */
+	char driver[8];
+
+	/* SDL display surface */
+	SDL_Surface *surface;
+
+	/* SDL RGB surface */
+	SDL_Surface *rgbsurface;
+
+	/* SDL YUV overlay */
+	SDL_Overlay *overlay;
+
+	/* available fullscreen modes */
+	SDL_Rect **fullmodes;
+
+	/* surface attributes for fullscreen and windowed mode */
+	Uint32 sdlflags, sdlfullflags;
+
+	/* save the windowed output extents */
+	SDL_Rect windowsize;
+
+	/* Bits per Pixel */
+	Uint8 bpp;
+
+	/* RGB or YUV? */
+	Uint8 mode;
+	#define YUV 0
+	#define RGB 1
+	#define BGR 2
+
+	/* use direct blitting to surface */
+	int dblit;
+
+	/* current fullscreen mode, 0 = highest available fullscreen mode */
+	int fullmode;
+
+	/* YUV ints */
+	int framePlaneY, framePlaneUV, framePlaneYUY;
+	int stridePlaneY, stridePlaneUV, stridePlaneYUY;
+
+	/* RGB ints */
+	int framePlaneRGB;
+	int stridePlaneRGB;
+
+	/* Flip image */
+	int flip;
+
+	/* fullscreen behaviour; see init */
+	int fulltype;
+	
+	/* original image dimensions */
+	int width, height;
+
+	/* destination dimensions */
+	int dstwidth, dstheight;
+
+	/* Draw image at coordinate y on the SDL surfaces */
+	int y;
+
+	/* The image is displayed between those y coordinates in priv->surface */
+	int y_screen_top, y_screen_bottom;
+
+	/* 1 if the OSD has changed otherwise 0 */
+	int osd_has_changed;
+
+	/* source image format (YUV/RGB/...) */
+	uint32_t format;
+	int surfwidth, surfheight;
+
+	SDL_Rect dirty_off_frame[2];
+} sdl_priv;
+
+static int setup_surfaces(void);
+static void set_video_mode(int width, int height, int bpp, uint32_t sdlflags);
+/** libvo Plugin functions **/
+
+/**
+ * draw_alpha is used for osd and subtitle display.
+ *
+ **/
+
+static void draw_alpha(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride)
+{
+}
+
+
+/**
+ * Take a null-terminated array of pointers, and find the last element.
+ *
+ *    params : array == array of which we want to find the last element.
+ *   returns : index of last NON-NULL element.
+ **/
+
+
+/**
+ * Open and prepare SDL output.
+ *
+ *    params : *plugin ==
+ *             *name ==
+ *   returns : 0 on success, -1 on failure
+ **/
+
+static int sdl_open (void *plugin, void *name)
+{
+	struct sdl_priv_s *priv = &sdl_priv;
+	const SDL_VideoInfo *vidInfo = NULL;
+
+	/* Setup Keyrepeats (500/30 are defaults) */
+	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, 100 /*SDL_DEFAULT_REPEAT_INTERVAL*/);
+
+	/* get information about the graphics adapter */
+	vidInfo = SDL_GetVideoInfo ();
+
+	/* collect all fullscreen & hardware modes available */
+	if (!(priv->fullmodes = SDL_ListModes (vidInfo->vfmt, priv->sdlfullflags))) {
+
+		/* non hardware accelerated fullscreen modes */
+		priv->sdlfullflags &= ~SDL_HWSURFACE;
+ 		priv->fullmodes = SDL_ListModes (vidInfo->vfmt, priv->sdlfullflags);
+	}
+
+	/* test for normal resizeable & windowed hardware accellerated surfaces */
+	if (!SDL_ListModes (vidInfo->vfmt, priv->sdlflags)) {
+
+		/* test for NON hardware accelerated resizeable surfaces - poor you.
+		 * That's all we have. If this fails there's nothing left.
+		 * Theoretically there could be Fullscreenmodes left - we ignore this for now.
+		 */
+		priv->sdlflags &= ~SDL_HWSURFACE;
+		if ((!SDL_ListModes (vidInfo->vfmt, priv->sdlflags)) && (!priv->fullmodes)) {
+			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_SDL_CouldntGetAnyAcceptableSDLModeForOutput);
+			return -1;
+		}
+	}
+
+
+   /* YUV overlays need at least 16-bit color depth, but the
+	* display might less. The SDL AAlib target says it can only do
+	* 8-bits, for example. So, if the display is less than 16-bits,
+	* we'll force the BPP to 16, and pray that SDL can emulate for us.
+	*/
+	priv->bpp = vidInfo->vfmt->BitsPerPixel;
+	return 0;
+}
+
+
+/**
+ * Close SDL, Cleanups, Free Memory
+ *
+ *    params : *plugin
+ *   returns : non-zero on success, zero on error.
+ **/
 
 static int sdl_close (void)
 {
+	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_Quit();
 	return 0;
 }
 
+/**
+ * Do aspect ratio calculations
+ *
+ *   params : srcw == sourcewidth
+ *            srch == sourceheight
+ *            dstw == destinationwidth
+ *            dsth == destinationheight
+ *
+ *  returns : SDL_Rect structure with new x and y, w and h
+ **/
+
+/**
+ * Sets the specified fullscreen mode.
+ *
+ *   params : mode == index of the desired fullscreen mode
+ *  returns : doesn't return
+ **/
+
 /* Set video mode. Not fullscreen */
-static void set_video_mode(int width, int height)
+static void set_video_mode(int width, int height, int bpp, uint32_t sdlflags)
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION,2);
-	//PDL_Init(0);
+	SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8);
+	SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8);
+	SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8);
+	SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8);
+	SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24);
+	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1);
+	SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1);
 	SDL_SetVideoMode(0, 0, 0, SDL_OPENGLES);
 	GL_Init();
 	GL_InitTexture(width,height);
-	glUseProgram (program);
-	memcpy(vertexCoords, scale_n, 8*sizeof(float));
+	glUseProgram ( program );
+	memcpy( vertexCoords, scale_1, 8*sizeof(float));
 	glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
 	glVertexAttribPointer( texCoord, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), texCoords );
 	glEnableVertexAttribArray( position );    
 	glEnableVertexAttribArray( texCoord );
-	glClear(GL_COLOR_BUFFER_BIT);
+	glBindTexture(GL_TEXTURE_2D, texture);
 	
 	priv->dstwidth = width;
 	priv->dstheight = height;
 }
 
+
+/**
+ * Initialize an SDL surface and an SDL YUV overlay.
+ *
+ *    params : width  == width of video we'll be displaying.
+ *             height == height of video we'll be displaying.
+ *             fullscreen == want to be fullscreen?
+ *             title == Title for window titlebar.
+ *   returns : non-zero on success, zero on error.
+ **/
 static int
 config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uint32_t flags, char *title, uint32_t format)
-{   
+//static int sdl_setup (int width, int height)
+{
 	struct sdl_priv_s *priv = &sdl_priv;
-	d_width = width;
-	d_height = height;
+	    d_width = width;
+	    d_height = height;
+
 	aspect_save_orig(width,height);
 	aspect_save_prescale(d_width ? d_width : width, d_height ? d_height : height);
+	priv->width  = width;
+	priv->height = height;
 	priv->dstwidth  = d_width ? d_width : width;
 	priv->dstheight = d_height ? d_height : height;
-
-	set_video_mode(priv->dstwidth, priv->dstheight);
+	priv->windowsize.w = priv->dstwidth;
+  	priv->windowsize.h = priv->dstheight;
+	set_video_mode(priv->dstwidth, priv->dstheight, priv->bpp, priv->sdlflags);
 	return 0;
+}
+
+static int setup_surfaces(void)
+{
 }
 
 
@@ -324,14 +491,9 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 static int draw_frame(uint8_t *src[])
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	glBindTexture(GL_TEXTURE_2D,0);
 	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, priv->dstwidth,priv->dstheight,GL_RGBA,GL_UNSIGNED_BYTE,src[0]);
-	glUniform1i(sampler, 0);
-	
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);
-	SDL_GL_SwapBuffers();
-//	printf("use time %d ms\n",SDL_GetTicks()-start); //test the one frame use time...
-//	start = SDL_GetTicks();
+	glUniform1i( samplerLoc, 0 );
+	glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices );
 	return 0;
 }
 
@@ -343,31 +505,8 @@ static int draw_frame(uint8_t *src[])
  *  returns : non-zero on error, zero on success.
  **/
 
-//static uint32_t draw_slice(uint8_t *src[], uint32_t slice_num)
-static int draw_slice(uint8_t *src[], int stride[], int w,int h,int x,int y)
-{	
-	glBindTexture(GL_TEXTURE_2D,0);
-	glUniform1i(loc_tex_y, 0);
-//	glTexSubImage2D(GL_TEXTURE_2D,0, 0, 0, w, h,GL_LUMINANCE,GL_UNSIGNED_BYTE,src[0]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, w, h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,src[0]);//it is faster on this device ...
-	w=w>>1;h=h>>1;
-
-	glBindTexture(GL_TEXTURE_2D,1);
-	glUniform1i(loc_tex_u, 1);
-//	glTexSubImage2D(GL_TEXTURE_2D,0, 0, 0, w, h,GL_LUMINANCE,GL_UNSIGNED_BYTE,src[1]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, w, h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,src[1]);
-
-	glBindTexture(GL_TEXTURE_2D,2);
-	glUniform1i(loc_tex_v, 2);
-//	glTexSubImage2D(GL_TEXTURE_2D,0, 0, 0, w, h,GL_LUMINANCE,GL_UNSIGNED_BYTE,src[2]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, w, h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,src[2]);
-	
-	//flip to screen..
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);
-	SDL_GL_SwapBuffers();
-//	printf("use time %d ms\n",SDL_GetTicks()-start); //test the one frame use time...
-//	start = SDL_GetTicks();
-
+static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
+{
 	return 0;
 }
 
@@ -380,50 +519,50 @@ static int draw_slice(uint8_t *src[], int stride[], int w,int h,int x,int y)
  *  returns : doesn't return
  **/
 
+#include "osdep/keycodes.h"
+
+#define shift_key (event.key.keysym.mod==(KMOD_LSHIFT||KMOD_RSHIFT))
 static void check_events (void)
 {
+	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_Event event;
 	SDLKey keypressed = SDLK_UNKNOWN;
-
-	/* Poll the waiting SDL Events */
 	while ( SDL_PollEvent(&event) ) {
 		switch (event.type) {
 			case SDL_KEYDOWN:
 				keypressed = event.key.keysym.sym;
  				mp_msg(MSGT_VO,MSGL_DBG2, "SDL: Key pressed: '%i'\n", keypressed);
+								switch(keypressed){
+								case SDLK_q: mplayer_put_key('q');break;
+	                            case SDLK_w: mplayer_put_key(KEY_UP);break;
+	                            case SDLK_z: mplayer_put_key(KEY_DOWN);break;
+	                            case SDLK_a: mplayer_put_key(KEY_LEFT);break;
+	                            case SDLK_d: mplayer_put_key(KEY_RIGHT);break;
+								case SDLK_c: change_scale();break;
+								default:
+									mplayer_put_key(keypressed);
+									}
 
-				switch(keypressed){
-					case SDLK_q: mplayer_put_key('q');
-						//PDL_Quit();
-					break;
-                        	        case SDLK_w: mplayer_put_key(KEY_UP);break;
-                                	case SDLK_z: mplayer_put_key(KEY_DOWN);break;
-	                                case SDLK_a: mplayer_put_key(KEY_LEFT);break;
-        	                        case SDLK_d: mplayer_put_key(KEY_RIGHT);break;
-					case SDLK_c: change_scale();break;
-					default:
-						mplayer_put_key(keypressed);
-					}
-
-			break;
-			case SDL_QUIT: mplayer_put_key(KEY_CLOSE_WIN);break;
+				break;
+				case SDL_QUIT: mplayer_put_key(KEY_CLOSE_WIN);break;
 		}
 	}
 }
-
 #undef shift_key
 
+/* Erase (paint it black) the rectangle specified by x, y, w and h in the surface
+   or overlay which is used for OSD
+*/
 static void draw_osd(void)
-{
+{   
 }
 
 /* Fill area beginning at 'pixels' with 'color'. 'x_start', 'width' and 'pitch'
  * are given in bytes. 4 bytes at a time.
  */
-static void erase_area_4(int x_start, int width, int height, int pitch, uint32_t color, uint8_t* pixels)
-{
-}
-
+/* Fill area beginning at 'pixels' with 'color'. 'x_start', 'width' and 'pitch'
+ * are given in bytes. 1 byte at a time.
+ */
 /**
  * Display the surface we have written our data to
  *
@@ -433,12 +572,14 @@ static void erase_area_4(int x_start, int width, int height, int pitch, uint32_t
 
 static void flip_page (void)
 {
+	SDL_GL_SwapBuffers();
+	glClear(GL_COLOR_BUFFER_BIT);
 }
 
 static int
 query_format(uint32_t format)
 {
-	if (format != IMGFMT_YV12) return 0;//just use YV12..
+	if (format != IMGFMT_RGB32) return 0;	
 	return VFCAP_CSP_SUPPORTED | VFCAP_OSD | VFCAP_FLIP;
 }
 
@@ -447,33 +588,40 @@ static void
 uninit(void)
 {
 	sdl_close();
-
  	mp_msg(MSGT_VO,MSGL_DBG3, "SDL: Closed Plugin\n");
+
 }
 
 static int preinit(const char *arg)
 {
-    struct sdl_priv_s *priv = &sdl_priv;
-    SDL_Init (SDL_INIT_VIDEO|SDL_INIT_NOPARACHUTE);
-    SDL_VideoDriverName(priv->driver, 8);
-    mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_SDL_UsingDriver, priv->driver);
-
-    return 0;
+	struct sdl_priv_s *priv = &sdl_priv;
+	char * sdl_driver = NULL;
+	SDL_Init (SDL_INIT_VIDEO|SDL_INIT_NOPARACHUTE);
+	SDL_VideoDriverName(priv->driver, 8);
+	mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_SDL_UsingDriver, priv->driver);
+	return 0;
 }
 
 static uint32_t get_image(mp_image_t *mpi)
 {
+/*    struct sdl_priv_s *priv = &sdl_priv;
+	    mpi->planes[0] = (uint8_t *)priv->rgbsurface->pixels + priv->y*priv->rgbsurface->pitch;
+	    mpi->stride[0] = priv->rgbsurface->pitch;
+	    mpi->flags|=MP_IMGFLAG_DIRECT;*/
+	    return VO_TRUE;
 }
 
 static int control(uint32_t request, void *data)
 {
+  struct sdl_priv_s *priv = &sdl_priv;
   switch (request) {
   case VOCTRL_GET_IMAGE:
-      return get_image(data);
+	  return get_image(data);
   case VOCTRL_QUERY_FORMAT:
-    return query_format(*((uint32_t*)data));
+	return query_format(*((uint32_t*)data));
   case VOCTRL_FULLSCREEN:
-    return VO_TRUE;
+//      set_video_mode(priv->windowsize.w, priv->windowsize.h, priv->bpp, priv->sdlflags);
+	return VO_TRUE;
   }
 
   return VO_NOTIMPL;
