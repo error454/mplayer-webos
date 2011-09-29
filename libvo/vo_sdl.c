@@ -78,6 +78,10 @@ int scale;
 GLuint texture = 0;
 GLushort indices[] = { 0, 1, 2, 1, 2, 3 };
 
+GLint loc_tex_y;
+GLint loc_tex_u;
+GLint loc_tex_v;
+
 GLuint program;
 
 // Attribute locations
@@ -127,28 +131,6 @@ static const vo_info_t info =
 };
 
 const LIBVO_EXTERN(sdl)
-
-void change_scale(void)
-{
-	switch (scale) {
-		case 0:
-			memcpy( vertexCoords, scale_n, 8*sizeof(float));
-			glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
-			scale = 2;
-			break;
-		case 1:
-			memcpy( vertexCoords, scale_1, 8*sizeof(float));
-			glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
-			scale = 0;
-			break;
-		case 2:
-			memcpy( vertexCoords, scale_2, 8*sizeof(float));
-			glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
-			scale = 1;
-			break;
-			}
-	printf("now scale mode is %d\t\n\n",scale);
-}
 
 GLuint LoadShaderProgram(const char *p1, const char *p2)
 {
@@ -208,13 +190,39 @@ void GL_Init()
 	    "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
 	    "}                                                   \n";
 
+	//http://slouken.blogspot.com/2011/02/mpeg-acceleration-with-glsl.html  	
+	GLbyte YUVShader[] =
+	    "precision mediump float;                		 \n"
+	    "varying vec2 tcoord;                		 \n"
+	    "const vec3 v_offset = vec3(-0.0625, -0.5, -0.5);	 \n"
+	    "uniform sampler2D Ytex, Utex, Vtex;     	 	 \n"
+	    "const vec3 Rcoeff = vec3(1.164,  0.000,  1.596);    \n"
+	    "const vec3 Gcoeff = vec3(1.164, -0.391, -0.813);	 \n"
+	    "const vec3 Bcoeff = vec3(1.164,  2.018,  0.000);	 \n"
+	    "void main(void)                     	 	 \n"
+	    "{                            			 \n"
+	    "vec3 yuv, rgb;					 \n"
+	    "yuv.x = texture2D(tex0, tcoord).r;			 \n"
+    	    "tcoord *= 0.5;					 \n"
+    	    "yuv.y = texture2D(tex1, tcoord).r;			 \n"
+    	    "yuv.z = texture2D(tex2, tcoord).r;			 \n"
+	    "yuv += v_offset;					 \n"
+    	    "rgb.r = dot(yuv, Rcoeff);				 \n"
+    	    "rgb.g = dot(yuv, Gcoeff);				 \n"
+    	    "rgb.b = dot(yuv, Bcoeff);				 \n"
+	    "gl_FragColor = vec4(rgb, 1.0);			 \n"
+	    "}                            			 \n"  ;
+
 	program = LoadShaderProgram(( char *)vShaderStr, (char *)fShaderStr);
 	
 
 	position = glGetAttribLocation ( program, "a_position" );
 	
 	texCoord = glGetAttribLocation ( program, "a_texCoord" );
-	
+
+	loc_tex_y = glGetUniformLocation (program, "Ytex");
+	loc_tex_u = glGetUniformLocation (program, "Utex");
+	loc_tex_v = glGetUniformLocation (program, "Vtex");	
 
 	samplerLoc = glGetUniformLocation ( program, "s_texture" );
 	
@@ -233,6 +241,7 @@ void GL_InitTexture(int width, int height)
 	
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 	
+	//TODO for YUV
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL );
 }
 
@@ -432,9 +441,21 @@ static void set_video_mode(int width, int height, int bpp, uint32_t sdlflags)
 	SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1);
 	SDL_SetVideoMode(0, 0, 0, SDL_OPENGLES);
 	GL_Init();
-	GL_InitTexture(width,height);
+	GL_InitTexture(width, height);
 	glUseProgram ( program );
-	memcpy( vertexCoords, scale_1, 8*sizeof(float));
+
+	//Calculate the correct aspect ratio for the texture coordinates
+	//Given the screen size of 1024x768
+	float yAspect = (1024.0 / ((float)width/height)) / 768.0;
+	float scale_fit[8] =
+	{
+	  1, yAspect,
+	  -1, yAspect,
+	  1, -yAspect,
+          -1, -yAspect
+	};
+	
+	memcpy( vertexCoords, scale_fit, 8*sizeof(float));
 	glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
 	glVertexAttribPointer( texCoord, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), texCoords );
 	glEnableVertexAttribArray( position );    
@@ -471,6 +492,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	priv->dstheight = d_height ? d_height : height;
 	priv->windowsize.w = priv->dstwidth;
   	priv->windowsize.h = priv->dstheight;
+	
 	set_video_mode(priv->dstwidth, priv->dstheight, priv->bpp, priv->sdlflags);
 	return 0;
 }
@@ -522,32 +544,34 @@ static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
 #include "osdep/keycodes.h"
 
 #define shift_key (event.key.keysym.mod==(KMOD_LSHIFT||KMOD_RSHIFT))
+
 static void check_events (void)
-{
+{/*
 	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_Event event;
 	SDLKey keypressed = SDLK_UNKNOWN;
 	while ( SDL_PollEvent(&event) ) {
 		switch (event.type) {
 			case SDL_KEYDOWN:
+				printf("A key was pressed!\n\n");
 				keypressed = event.key.keysym.sym;
  				mp_msg(MSGT_VO,MSGL_DBG2, "SDL: Key pressed: '%i'\n", keypressed);
-								switch(keypressed){
-								case SDLK_q: mplayer_put_key('q');break;
-	                            case SDLK_w: mplayer_put_key(KEY_UP);break;
-	                            case SDLK_z: mplayer_put_key(KEY_DOWN);break;
-	                            case SDLK_a: mplayer_put_key(KEY_LEFT);break;
-	                            case SDLK_d: mplayer_put_key(KEY_RIGHT);break;
-								case SDLK_c: change_scale();break;
-								default:
-									mplayer_put_key(keypressed);
-									}
+				switch(keypressed){
+					case SDLK_q: mplayer_put_key('q');break;
+					case SDLK_w: mplayer_put_key(KEY_UP);break;
+	                            	case SDLK_z: mplayer_put_key(KEY_DOWN);break;
+					case SDLK_a: mplayer_put_key(KEY_LEFT);break;
+					case SDLK_d: mplayer_put_key(KEY_RIGHT);break;
+					case SDLK_c: change_scale();break;
+					default:
+						mplayer_put_key(keypressed);
+				}
 
 				break;
-				case SDL_QUIT: mplayer_put_key(KEY_CLOSE_WIN);break;
+			case SDL_QUIT: mplayer_put_key(KEY_CLOSE_WIN);break;
 		}
 	}
-}
+*/}
 #undef shift_key
 
 /* Erase (paint it black) the rectangle specified by x, y, w and h in the surface
