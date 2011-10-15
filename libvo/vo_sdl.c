@@ -73,46 +73,21 @@
 #include <SDL/SDL_opengles.h>
 #include <SDL/SDL_opengles_ext.h>
 
-
-int scale;
-GLuint texture = 0;
-GLushort indices[] = { 0, 1, 2, 1, 2, 3 };
-
-GLint loc_tex_y;
-GLint loc_tex_u;
-GLint loc_tex_v;
-
 GLuint program;
 
-// Attribute locations
-GLint  position;
-GLint  texCoord;
+//Texture stuff
+static GLuint texture;  //The texture
+static GLuint yuvTextures[3];
+GLint position;         //Texture position
+GLint texCoord;         //Texture coordinates
+GLint samplerLoc;       //Used to get a ref to the sampler2D texture in the shader
+GLint yLoc;
+GLint uLoc;
+GLint vLoc;
 
-// Sampler location
-GLint samplerLoc;
+//Geometry and texture coordinates
 float vertexCoords[8];
-float scale_n[8] =
-{
-	0.8, 1,
-	-0.8, 1,
-	0.8, -1,
-	-0.8, -1
-};
-float scale_1[8] =
-{
-	1, 1,
-	-1, 1,
-	1, -1,
-	-1, -1
-};
-
-float scale_2[8] =
-{
-	1, 0.9,
-	-1, 0.9,
-	1, -0.9,
-	-1, -0.9
-};
+GLushort indices[] = { 0, 1, 2, 1, 2, 3 };
 
 float texCoords[] =
 {
@@ -121,6 +96,11 @@ float texCoords[] =
 	1.0, 1.0,
 	0.0, 1.0
 };
+
+//For subtitles
+static unsigned char *ImageData=NULL;
+static uint32_t image_width;
+static uint32_t image_height;
 
 static const vo_info_t info =
 {
@@ -132,8 +112,12 @@ static const vo_info_t info =
 
 const LIBVO_EXTERN(sdl)
 
+static int sdl_close (void);
+
 GLuint LoadShaderProgram(const char *p1, const char *p2)
 {
+    GLint status;
+    
 	GLuint vshader;
 	GLuint fshader;
 	GLuint program;
@@ -145,6 +129,20 @@ GLuint LoadShaderProgram(const char *p1, const char *p2)
 	fshader = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fshader,1,&p2,NULL);
 	glCompileShader(fshader);
+    
+    glGetShaderiv(vshader, GL_COMPILE_STATUS, &status);
+    if (status == 0){
+        printf("Vertex shader failed to comile!\n");
+        sdl_close();
+        return -1;
+    }
+    
+    glGetShaderiv(fshader, GL_COMPILE_STATUS, &status);
+    if (status == 0){
+        printf("Fragment shader failed to comile!\n");
+        sdl_close();
+        return -1;
+    }
 
 	program = glCreateProgram();
 	glAttachShader(program,fshader);
@@ -160,17 +158,14 @@ GLuint LoadShaderProgram(const char *p1, const char *p2)
 
 void GL_Init()
 {
-	// setup 2D gl environment
-	
 	glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );//black background
-	
-
 	glDisable(GL_DEPTH_TEST);
 	glDepthFunc( GL_ALWAYS );
-	
 	glDisable(GL_CULL_FACE);
-	
 
+    //TODO: It would be nice to load these from a file
+    
+    ///A very basic vertex shader for our textured quad
 	GLbyte vShaderStr[] =  
 	    "attribute vec4 a_position;   \n"
 	    "attribute vec2 a_texCoord;   \n"
@@ -181,68 +176,94 @@ void GL_Init()
 	    "   v_texCoord = a_texCoord;  \n"
 	    "}                            \n";
 
+    //A basic fragment shader for texturing
 	GLbyte fShaderStr[] =  
-	    "precision mediump float;                            \n"
+	    "precision lowp float;                            	 \n"
 	    "varying vec2 v_texCoord;                            \n"
-	    "uniform sampler2D s_texture;                        \n"
+	    "uniform sampler2D tex0;                             \n"
 	    "void main()                                         \n"
 	    "{                                                   \n"
-	    "  gl_FragColor = texture2D( s_texture, v_texCoord );\n"
+	    "  gl_FragColor = texture2D( tex0, v_texCoord );     \n"
 	    "}                                                   \n";
 
-	//http://slouken.blogspot.com/2011/02/mpeg-acceleration-with-glsl.html  	
-	GLbyte YUVShader[] =
-	    "precision mediump float;                		 \n"
-	    "varying vec2 tcoord;                		 \n"
-	    "const vec3 v_offset = vec3(-0.0625, -0.5, -0.5);	 \n"
-	    "uniform sampler2D Ytex, Utex, Vtex;     	 	 \n"
-	    "const vec3 Rcoeff = vec3(1.164,  0.000,  1.596);    \n"
-	    "const vec3 Gcoeff = vec3(1.164, -0.391, -0.813);	 \n"
-	    "const vec3 Bcoeff = vec3(1.164,  2.018,  0.000);	 \n"
-	    "void main(void)                     	 	 \n"
-	    "{                            			 \n"
-	    "vec3 yuv, rgb;					 \n"
-	    "yuv.x = texture2D(tex0, tcoord).r;			 \n"
-    	    "tcoord *= 0.5;					 \n"
-    	    "yuv.y = texture2D(tex1, tcoord).r;			 \n"
-    	    "yuv.z = texture2D(tex2, tcoord).r;			 \n"
-	    "yuv += v_offset;					 \n"
-    	    "rgb.r = dot(yuv, Rcoeff);				 \n"
-    	    "rgb.g = dot(yuv, Gcoeff);				 \n"
-    	    "rgb.b = dot(yuv, Bcoeff);				 \n"
-	    "gl_FragColor = vec4(rgb, 1.0);			 \n"
-	    "}                            			 \n"  ;
+    //A test shader to help with debug
+    GLbyte testShader[] =
+        "void main (void)                              \n"
+        "{                                             \n"
+        "    gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0);  \n"
+        "}                                              ";
+       
+	//A fragment shader for converting from YUV to RGB
+	GLbyte YUVtoRGBShader[] = 
+	"precision lowp float;\n"
+	"uniform sampler2D tex0, tex1, tex2;		\n"
+	"varying vec2 v_texCoord;					\n"
 
+	"void main(void) {							\n"
+	"  float r, g, b, y, u, v;					\n"
+	"  y = texture2D(tex0, v_texCoord).x;		\n"
+	"  u = texture2D(tex1, v_texCoord).x;		\n"
+	"  v = texture2D(tex2, v_texCoord).x;		\n"
+
+	"  y = 1.1643 * (y - 0.0625);				\n"
+	"  u = u - 0.5;								\n"
+	"  v = v - 0.5;								\n"
+
+	"  r = y + 1.5958 * v;						\n"
+	"  g = y - 0.39173 * u - 0.81290 * v;		\n"
+	"  b = y + 2.017 * u;						\n"
+
+	"  gl_FragColor = vec4(r, g, b, 1.0);		\n"
+	"}											\n";
+ 
 	program = LoadShaderProgram(( char *)vShaderStr, (char *)fShaderStr);
-	
 
 	position = glGetAttribLocation ( program, "a_position" );
-	
 	texCoord = glGetAttribLocation ( program, "a_texCoord" );
 
-	loc_tex_y = glGetUniformLocation (program, "Ytex");
-	loc_tex_u = glGetUniformLocation (program, "Utex");
-	loc_tex_v = glGetUniformLocation (program, "Vtex");	
-
-	samplerLoc = glGetUniformLocation ( program, "s_texture" );
-	
+	yLoc = glGetUniformLocation ( program, "tex0" );
+//	uLoc = glGetUniformLocation ( program, "tex1" );
+//	vLoc = glGetUniformLocation ( program, "tex2" );
 }
 void GL_InitTexture(int width, int height)
 {
+	
 	glGenTextures(1, &texture);
-	
+    
 	glBindTexture(GL_TEXTURE_2D, texture);
-
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-	
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-	
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-	
-	//TODO for YUV
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL );
+	
+	/*
+	glGenTextures(3, yuvTextures);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, yuvTextures[0]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	//glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
+	
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, yuvTextures[1]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);   
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );   
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );   
+	//glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width>>1, height>>1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
+	
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, yuvTextures[2]);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	//glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width>>1, height>>1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,0);
+	*/
 }
 
 
@@ -322,27 +343,35 @@ static struct sdl_priv_s {
 	SDL_Rect dirty_off_frame[2];
 } sdl_priv;
 
+static void (*draw_alpha_fnc)
+   (int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride);
+
+static void draw_alpha_32(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride){
+   struct sdl_priv_s *priv = &sdl_priv;
+   vo_draw_alpha_rgb32(w,h,src,srca,stride,ImageData+4*(y0*priv->width+x0),4*priv->width);
+}
+
+static void draw_alpha_24(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride){
+   struct sdl_priv_s *priv = &sdl_priv;
+   vo_draw_alpha_rgb24(w,h,src,srca,stride,ImageData+3*(y0*priv->width+x0),3*priv->width);
+}
+
+static void draw_alpha_16(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride){
+   struct sdl_priv_s *priv = &sdl_priv;
+   vo_draw_alpha_rgb16(w,h,src,srca,stride,ImageData+2*(y0*priv->width+x0),2*priv->width);
+}
+
+static void draw_alpha_15(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride){
+   struct sdl_priv_s *priv = &sdl_priv;
+   vo_draw_alpha_rgb15(w,h,src,srca,stride,ImageData+2*(y0*priv->width+x0),2*priv->width);
+}
+
+static void draw_alpha_null(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride){
+}
+
 static int setup_surfaces(void);
 static void set_video_mode(int width, int height, int bpp, uint32_t sdlflags);
 /** libvo Plugin functions **/
-
-/**
- * draw_alpha is used for osd and subtitle display.
- *
- **/
-
-static void draw_alpha(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride)
-{
-}
-
-
-/**
- * Take a null-terminated array of pointers, and find the last element.
- *
- *    params : array == array of which we want to find the last element.
- *   returns : index of last NON-NULL element.
- **/
-
 
 /**
  * Open and prepare SDL output.
@@ -351,47 +380,8 @@ static void draw_alpha(int x0,int y0, int w,int h, unsigned char* src, unsigned 
  *             *name ==
  *   returns : 0 on success, -1 on failure
  **/
-
 static int sdl_open (void *plugin, void *name)
 {
-	struct sdl_priv_s *priv = &sdl_priv;
-	const SDL_VideoInfo *vidInfo = NULL;
-
-	/* Setup Keyrepeats (500/30 are defaults) */
-	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, 100 /*SDL_DEFAULT_REPEAT_INTERVAL*/);
-
-	/* get information about the graphics adapter */
-	vidInfo = SDL_GetVideoInfo ();
-
-	/* collect all fullscreen & hardware modes available */
-	if (!(priv->fullmodes = SDL_ListModes (vidInfo->vfmt, priv->sdlfullflags))) {
-
-		/* non hardware accelerated fullscreen modes */
-		priv->sdlfullflags &= ~SDL_HWSURFACE;
- 		priv->fullmodes = SDL_ListModes (vidInfo->vfmt, priv->sdlfullflags);
-	}
-
-	/* test for normal resizeable & windowed hardware accellerated surfaces */
-	if (!SDL_ListModes (vidInfo->vfmt, priv->sdlflags)) {
-
-		/* test for NON hardware accelerated resizeable surfaces - poor you.
-		 * That's all we have. If this fails there's nothing left.
-		 * Theoretically there could be Fullscreenmodes left - we ignore this for now.
-		 */
-		priv->sdlflags &= ~SDL_HWSURFACE;
-		if ((!SDL_ListModes (vidInfo->vfmt, priv->sdlflags)) && (!priv->fullmodes)) {
-			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_SDL_CouldntGetAnyAcceptableSDLModeForOutput);
-			return -1;
-		}
-	}
-
-
-   /* YUV overlays need at least 16-bit color depth, but the
-	* display might less. The SDL AAlib target says it can only do
-	* 8-bits, for example. So, if the display is less than 16-bits,
-	* we'll force the BPP to 16, and pray that SDL can emulate for us.
-	*/
-	priv->bpp = vidInfo->vfmt->BitsPerPixel;
 	return 0;
 }
 
@@ -405,21 +395,12 @@ static int sdl_open (void *plugin, void *name)
 
 static int sdl_close (void)
 {
-	struct sdl_priv_s *priv = &sdl_priv;
+	glDeleteTextures(3, yuvTextures);
+	glDeleteTextures(1, &texture);
+	struct sdl_priv_s *priv = &sdl_priv;   
 	SDL_Quit();
 	return 0;
 }
-
-/**
- * Do aspect ratio calculations
- *
- *   params : srcw == sourcewidth
- *            srch == sourceheight
- *            dstw == destinationwidth
- *            dsth == destinationheight
- *
- *  returns : SDL_Rect structure with new x and y, w and h
- **/
 
 /**
  * Sets the specified fullscreen mode.
@@ -432,57 +413,54 @@ static int sdl_close (void)
 static void set_video_mode(int width, int height, int bpp, uint32_t sdlflags)
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8);
-	SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8);
-	SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8);
-	SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24);
-	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1);
-	SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1);
-	SDL_SetVideoMode(0, 0, 0, SDL_OPENGLES);
-	GL_Init();
+    SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION,2);
+    SDL_SetVideoMode(0, 0, 0, SDL_OPENGLES);
+	
+    GL_Init();
+	glUseProgram (program);
 	GL_InitTexture(width, height);
-	glUseProgram ( program );
-
-	//Calculate the correct aspect ratio for the texture coordinates
-	//Given the screen size of 1024x768
+	
+	//Calculate the correct aspect ratio for the vertices iven the screen size of 1024x768
 	float yAspect = (1024.0 / ((float)width/height)) / 768.0;
 	float scale_fit[8] =
 	{
-	  1, yAspect,
-	  -1, yAspect,
-	  1, -yAspect,
-          -1, -yAspect
+        1, yAspect,
+        -1, yAspect,
+        1, -yAspect,
+        -1, -yAspect
 	};
 	
+    //Copy the scale values to the vertex variable
 	memcpy( vertexCoords, scale_fit, 8*sizeof(float));
+    
+    //Bind the position and texCoord to the vertex shader variables
 	glVertexAttribPointer( position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), vertexCoords );
-	glVertexAttribPointer( texCoord, 2, GL_FLOAT, GL_FALSE, 2*sizeof(GLfloat), texCoords );
+	glVertexAttribPointer( texCoord, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), texCoords );
+    
+    //Bind the texture
+	glUniform1i(yLoc, 0);
+	//glUniform1i(uLoc, 1);
+	//glUniform1i(vLoc, 2);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    
+    //Enable the bound attribute arrays so they'll be used when rendering
 	glEnableVertexAttribArray( position );    
 	glEnableVertexAttribArray( texCoord );
-	glBindTexture(GL_TEXTURE_2D, texture);
+    
+    //Clear the color buffer
+    glClear(GL_COLOR_BUFFER_BIT);
 	
 	priv->dstwidth = width;
 	priv->dstheight = height;
 }
 
-
-/**
- * Initialize an SDL surface and an SDL YUV overlay.
- *
- *    params : width  == width of video we'll be displaying.
- *             height == height of video we'll be displaying.
- *             fullscreen == want to be fullscreen?
- *             title == Title for window titlebar.
- *   returns : non-zero on success, zero on error.
- **/
 static int
 config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uint32_t flags, char *title, uint32_t format)
-//static int sdl_setup (int width, int height)
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	    d_width = width;
-	    d_height = height;
+    d_width = width;
+    d_height = height;
 
 	aspect_save_orig(width,height);
 	aspect_save_prescale(d_width ? d_width : width, d_height ? d_height : height);
@@ -494,13 +472,24 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
   	priv->windowsize.h = priv->dstheight;
 	
 	set_video_mode(priv->dstwidth, priv->dstheight, priv->bpp, priv->sdlflags);
+	draw_alpha_fnc=draw_alpha_null;
+
+	//For the touchpad this will always be 32
+	/*
+	switch(priv->bpp) {
+	case 15:
+		draw_alpha_fnc=draw_alpha_15; break;
+	case 16:
+		draw_alpha_fnc=draw_alpha_16; break;
+	case 24:
+		draw_alpha_fnc=draw_alpha_24; break;
+	case 32:
+		draw_alpha_fnc=draw_alpha_32; break;
+  	}
 	return 0;
+	*/
+	draw_alpha_fnc=draw_alpha_32;
 }
-
-static int setup_surfaces(void)
-{
-}
-
 
 /**
  * Draw a frame to the SDL YUV overlay.
@@ -509,13 +498,17 @@ static int setup_surfaces(void)
  *  returns : non-zero on success, zero on error.
  **/
 
-//static int sdl_draw_frame (frame_t *frame)
 static int draw_frame(uint8_t *src[])
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, priv->dstwidth,priv->dstheight,GL_RGBA,GL_UNSIGNED_BYTE,src[0]);
-	glUniform1i( samplerLoc, 0 );
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, priv->dstwidth,priv->dstheight, GL_RGBA,GL_UNSIGNED_BYTE, src[0]);
+	
 	glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices );
+	
+	//For the OSD
+	ImageData=(unsigned char *)src[0];
+	
+	//SDL_GL_SwapBuffers();
 	return 0;
 }
 
@@ -527,8 +520,34 @@ static int draw_frame(uint8_t *src[])
  *  returns : non-zero on error, zero on success.
  **/
 
-static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
+static int draw_slice(uint8_t *src[], int stride[], int w, int h, int x, int y)
 {
+	//printf("draw_slice: strideY: %d strideU: %d strideV: %d x: %d y: %d w: %d h: %d\n", stride[0], stride[1], //stride[2], x, y, w, h);
+
+	uint8_t *yptr = src[0], *uptr = src[1], *vptr = src[2];
+    
+    //printf("draw_slice: x: %d y: %d w: %d h: %d\n", x, y, w, h);
+    //Select the texture to work with
+    //Overwrite the uniform variable in the fragment shader to reset the texture
+    //Texture map the specified slice
+ 	glActiveTexture(GL_TEXTURE0);
+	//glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, stride[0], h, GL_LUMINANCE, GL_UNSIGNED_BYTE, yptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, stride[0], h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, yptr);
+	
+    //Adjust w/h to handle the U and V texture sizes
+    w=w>>1;h=h>>1;
+
+	glActiveTexture(GL_TEXTURE1);
+	//glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, stride[1], h, GL_LUMINANCE, GL_UNSIGNED_BYTE, uptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, stride[1], h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, uptr);
+
+	glActiveTexture(GL_TEXTURE2);
+	//glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, stride[2], h, GL_LUMINANCE, GL_UNSIGNED_BYTE, vptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, stride[2], h, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, vptr);
+	
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);	
+    SDL_GL_SwapBuffers();
+
 	return 0;
 }
 
@@ -546,7 +565,8 @@ static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
 #define shift_key (event.key.keysym.mod==(KMOD_LSHIFT||KMOD_RSHIFT))
 
 static void check_events (void)
-{/*
+{
+/*
 	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_Event event;
 	SDLKey keypressed = SDLK_UNKNOWN;
@@ -574,28 +594,25 @@ static void check_events (void)
 */}
 #undef shift_key
 
-/* Erase (paint it black) the rectangle specified by x, y, w and h in the surface
-   or overlay which is used for OSD
-*/
 static void draw_osd(void)
-{   
+{
+	if (ImageData){
+		struct sdl_priv_s *priv = &sdl_priv;
+		vo_draw_text(priv->width, priv->height, draw_alpha_fnc); 
+        
+		//TODO: I think this is bad, I shouldn't have to update the entire frame to draw the OSD
+		//		I should probably pass in another texture to use as the OSD drawing surface, this may
+		//		mean I switch to using vo_draw_text_ext
+		//		However, this does work for now, albeit slowly
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, priv->dstwidth,priv->dstheight, GL_RGBA, GL_UNSIGNED_BYTE, ImageData);
+	
+        glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices );
+	}
 }
-
-/* Fill area beginning at 'pixels' with 'color'. 'x_start', 'width' and 'pitch'
- * are given in bytes. 4 bytes at a time.
- */
-/* Fill area beginning at 'pixels' with 'color'. 'x_start', 'width' and 'pitch'
- * are given in bytes. 1 byte at a time.
- */
-/**
- * Display the surface we have written our data to
- *
- *   params : mode == index of the desired fullscreen mode
- *  returns : doesn't return
- **/
 
 static void flip_page (void)
 {
+    //TODO when is this called?
 	SDL_GL_SwapBuffers();
 	glClear(GL_COLOR_BUFFER_BIT);
 }
@@ -603,13 +620,20 @@ static void flip_page (void)
 static int
 query_format(uint32_t format)
 {
-	if (format != IMGFMT_RGB32) return 0;	
-	return VFCAP_CSP_SUPPORTED | VFCAP_OSD | VFCAP_FLIP;
+
+	//return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_OSD |
+      //     VFCAP_HWSCALE_UP | VFCAP_HWSCALE_DOWN | VFCAP_ACCEPT_STRIDE;
+	
+ 	switch(format) {
+    	case IMGFMT_RGB32:
+        	return VFCAP_CSP_SUPPORTED | VFCAP_OSD | VFCAP_CSP_SUPPORTED_BY_HW;
+	}
+
+	return VFCAP_OSD | VFCAP_ACCEPT_STRIDE;
 }
 
 
-static void
-uninit(void)
+static void uninit(void)
 {
 	sdl_close();
  	mp_msg(MSGT_VO,MSGL_DBG3, "SDL: Closed Plugin\n");
@@ -619,7 +643,7 @@ uninit(void)
 static int preinit(const char *arg)
 {
 	struct sdl_priv_s *priv = &sdl_priv;
-	char * sdl_driver = NULL;
+	//char * sdl_driver = NULL;
 	SDL_Init (SDL_INIT_VIDEO|SDL_INIT_NOPARACHUTE);
 	SDL_VideoDriverName(priv->driver, 8);
 	mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_SDL_UsingDriver, priv->driver);
