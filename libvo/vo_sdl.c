@@ -73,6 +73,10 @@
 #include <SDL/SDL_opengles.h>
 #include <SDL/SDL_opengles_ext.h>
 
+//#if defined(__ARM_NEON__)
+#include "yuv2rgb.neon.h"
+//#endif
+
 GLuint program;
 
 //Texture stuff
@@ -84,6 +88,7 @@ GLint samplerLoc;       //Used to get a ref to the sampler2D texture in the shad
 GLint yLoc;
 GLint uLoc;
 GLint vLoc;
+unsigned char *rgbTex = NULL;
 
 //Geometry and texture coordinates
 float vertexCoords[8];
@@ -101,6 +106,13 @@ float texCoords[] =
 static unsigned char *ImageData=NULL;
 static uint32_t image_width;
 static uint32_t image_height;
+
+//UI control stuff
+int paused = 0;
+Sint16 lastSwipeX, lastSwipeY;
+int swiping = 0;
+int buttonsDown = 0;
+const int swipeThreshold = 10;
 
 static const vo_info_t info =
 {
@@ -395,7 +407,7 @@ static int sdl_open (void *plugin, void *name)
 
 static int sdl_close (void)
 {
-	glDeleteTextures(3, yuvTextures);
+	//glDeleteTextures(3, yuvTextures);
 	glDeleteTextures(1, &texture);
 	struct sdl_priv_s *priv = &sdl_priv;   
 	SDL_Quit();
@@ -473,6 +485,8 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	
 	set_video_mode(priv->dstwidth, priv->dstheight, priv->bpp, priv->sdlflags);
 	draw_alpha_fnc=draw_alpha_null;
+    
+    rgbTex = (unsigned char *) malloc(width * height * 4);
 
 	//For the touchpad this will always be 32
 	/*
@@ -489,6 +503,8 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	return 0;
 	*/
 	draw_alpha_fnc=draw_alpha_32;
+    
+    return 0;
 }
 
 /**
@@ -522,8 +538,23 @@ static int draw_frame(uint8_t *src[])
 
 static int draw_slice(uint8_t *src[], int stride[], int w, int h, int x, int y)
 {
-	//printf("draw_slice: strideY: %d strideU: %d strideV: %d x: %d y: %d w: %d h: %d\n", stride[0], stride[1], //stride[2], x, y, w, h);
-
+    uint8_t *yptr = src[0], *uptr = src[1], *vptr = src[2];
+    
+    yuv420_2_rgb8888_neon(rgbTex, yptr, vptr, uptr,
+      w, h, stride[0], stride[1], w * 4);
+      
+    //struct sdl_priv_s *priv = &sdl_priv;
+    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgbTex);
+	//glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgbTex);
+	
+	//glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices );
+	
+	//For the OSD
+	ImageData=(unsigned char *)rgbTex;
+    
+      
+	//printf("draw_slice: strideY: %d strideU: %d strideV: %d x: %d y: %d w: %d h: %d\n", stride[0], stride[1], stride[2], x, y, w, h);
+/*
 	uint8_t *yptr = src[0], *uptr = src[1], *vptr = src[2];
     
     //printf("draw_slice: x: %d y: %d w: %d h: %d\n", x, y, w, h);
@@ -547,7 +578,8 @@ static int draw_slice(uint8_t *src[], int stride[], int w, int h, int x, int y)
 	
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices);	
     SDL_GL_SwapBuffers();
-
+    */
+    
 	return 0;
 }
 
@@ -566,32 +598,112 @@ static int draw_slice(uint8_t *src[], int stride[], int w, int h, int x, int y)
 
 static void check_events (void)
 {
-/*
 	struct sdl_priv_s *priv = &sdl_priv;
 	SDL_Event event;
 	SDLKey keypressed = SDLK_UNKNOWN;
 	while ( SDL_PollEvent(&event) ) {
 		switch (event.type) {
 			case SDL_KEYDOWN:
-				printf("A key was pressed!\n\n");
 				keypressed = event.key.keysym.sym;
- 				mp_msg(MSGT_VO,MSGL_DBG2, "SDL: Key pressed: '%i'\n", keypressed);
-				switch(keypressed){
-					case SDLK_q: mplayer_put_key('q');break;
-					case SDLK_w: mplayer_put_key(KEY_UP);break;
-	                            	case SDLK_z: mplayer_put_key(KEY_DOWN);break;
-					case SDLK_a: mplayer_put_key(KEY_LEFT);break;
-					case SDLK_d: mplayer_put_key(KEY_RIGHT);break;
-					case SDLK_c: change_scale();break;
+                switch(keypressed){
 					default:
 						mplayer_put_key(keypressed);
 				}
-
-				break;
+            break;
+            
 			case SDL_QUIT: mplayer_put_key(KEY_CLOSE_WIN);break;
+            
+            //Pause video when put into card view
+            case SDL_ACTIVEEVENT:
+                if(event.active.gain == 0){
+                    if(paused == 0){
+						//P displays the pause screen
+						//p pauses the video
+                        mplayer_put_key('P');
+                        mplayer_put_key('p');
+                        paused = 1;                        
+                    }
+                }
+            break;
+            
+            case SDL_MOUSEMOTION:
+				//If there's at least 1 button held down, store the relative motion and
+				//set swiping to true
+                if(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(1)){
+                    lastSwipeX = event.motion.xrel;
+                    lastSwipeY = event.motion.yrel;
+                    swiping = 1;
+                }
+            break;
+            
+            case SDL_MOUSEBUTTONDOWN:
+				//Track how many buttons are being pressed
+                buttonsDown++;
+            break;
+          
+            case SDL_MOUSEBUTTONUP:
+				//If we're not swiping then bail out, this is to prevent multiple
+				//actions from occurring at the end of a double tap swipe
+                if(swiping == 0){
+                    buttonsDown--;
+                    break;
+                }
+                swiping = 0;
+				
+				//If the swipe is greater than the threshold
+                if(lastSwipeX > swipeThreshold){
+                    //Was this a double tap swipe?
+                    if(buttonsDown > 1){
+                        //Do a big fast forward
+                        mplayer_put_key(KEY_UP);
+                    }
+                    else{
+						//Do a small fast forward
+                        mplayer_put_key(KEY_RIGHT);
+                    }
+                }
+                else if(lastSwipeX < -swipeThreshold){
+                    if(buttonsDown > 1){
+                        //Big rewind
+                        mplayer_put_key(KEY_DOWN);
+                    }
+                    else{
+                        //Small rewind
+                        mplayer_put_key(KEY_LEFT);
+                    }
+                }
+				else if(lastSwipeY > swipeThreshold){
+					if(buttonsDown > 2){
+						//Toggle subtitles
+						mplayer_put_key('v');
+					}
+				}
+				else if(lastSwipeY < -swipeThreshold){
+					if(buttonsDown > 2){
+						//Toggle subtitle track
+						mplayer_put_key('j');
+					}
+				}
+                else{
+					//The relative movement wasn't large enough to be detected
+					//as a swipe, treat this as a tap.
+					
+					//Toggle the paused variable
+                    paused = (paused == 0) ? 1 : 0;
+                    if(paused){
+						//Toggle the OSD and pause the video
+                        mplayer_put_key('P');
+                        mplayer_put_key('p');
+                    }
+                    else //Resume playing
+                        mplayer_put_key('p');
+                }
+                
+                buttonsDown--;
+            break;
 		}
 	}
-*/}
+}
 #undef shift_key
 
 static void draw_osd(void)
@@ -604,7 +716,11 @@ static void draw_osd(void)
 		//		I should probably pass in another texture to use as the OSD drawing surface, this may
 		//		mean I switch to using vo_draw_text_ext
 		//		However, this does work for now, albeit slowly
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, priv->dstwidth,priv->dstheight, GL_RGBA, GL_UNSIGNED_BYTE, ImageData);
+        //      Update, for now this is the only draw call
+        
+        //Why is subimage slower?
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, priv->dstwidth, priv->dstheight, 0, GL_RGBA, GL_UNSIGNED_BYTE, ImageData);
+        //glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, priv->dstwidth, priv->dstheight, GL_RGBA, GL_UNSIGNED_BYTE, ImageData);
 	
         glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, indices );
 	}
@@ -612,7 +728,6 @@ static void draw_osd(void)
 
 static void flip_page (void)
 {
-    //TODO when is this called?
 	SDL_GL_SwapBuffers();
 	glClear(GL_COLOR_BUFFER_BIT);
 }
@@ -620,22 +735,24 @@ static void flip_page (void)
 static int
 query_format(uint32_t format)
 {
-
-	//return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_OSD |
-      //     VFCAP_HWSCALE_UP | VFCAP_HWSCALE_DOWN | VFCAP_ACCEPT_STRIDE;
+    //printf("Got image format: %d\n", format);
 	
  	switch(format) {
     	case IMGFMT_RGB32:
         	return VFCAP_CSP_SUPPORTED | VFCAP_OSD | VFCAP_CSP_SUPPORTED_BY_HW;
+        case IMGFMT_YV12:
+            return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_OSD |
+           VFCAP_HWSCALE_UP | VFCAP_HWSCALE_DOWN | VFCAP_ACCEPT_STRIDE;
 	}
 
-	return VFCAP_OSD | VFCAP_ACCEPT_STRIDE;
+    return VFCAP_OSD;
 }
 
 
 static void uninit(void)
 {
 	sdl_close();
+    free(rgbTex);
  	mp_msg(MSGT_VO,MSGL_DBG3, "SDL: Closed Plugin\n");
 
 }
