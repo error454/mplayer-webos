@@ -1,6 +1,10 @@
-This is a fork of mplayer that is hacked for the HP Touchpad.
+This is a fork of mplayer that is hacked for the HP Touchpad.  
 
-The openGL SDL driver stuff was copied from the webOSinternals patch:
-http://git.webos-internals.org/preware/cross-compile/plain/packages/media/mplayer/mplayer-svn-r32749-webos.patch
+The majority of the changes here are in libvo/vo_sdl.c, the changes include:
+* NEON accelerated YUV to RGB conversion
+* Rendering of video using openGL 2.0
+* Subtitles and On Screen Display
+* Basic touch screen controls (Pause/Play, FF/Rew, Subtitle Toggle)
 
-It doesn't even run yet so don't get too excited.
+Currently MKV playback optimization is still under scrutiny.  Thus far, the best playback options are:
+-lavdopts fast:skiploopfilter=all:threads=4 -quiet
