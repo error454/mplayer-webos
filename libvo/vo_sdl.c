@@ -653,41 +653,46 @@ static void check_events (void)
 				//If the swipe is greater than the threshold
                 if(lastSwipeX > swipeThreshold){
                     //Was this a double tap swipe?
-                    if(buttonsDown > 1){
+                    if(buttonsDown > 1 && buttonsDown < 3){
                         //Do a big fast forward
                         mplayer_put_key(KEY_UP);
+                        paused = 0;
                     }
-                    else{
+                    else if(buttonsDown < 3){
 						//Do a small fast forward
                         mplayer_put_key(KEY_RIGHT);
+                        paused = 0;
                     }
                 }
                 else if(lastSwipeX < -swipeThreshold){
-                    if(buttonsDown > 1){
+                    if(buttonsDown > 1 && buttonsDown < 3){
                         //Big rewind
                         mplayer_put_key(KEY_DOWN);
+                        paused = 0;
                     }
-                    else{
+                    else if(buttonsDown < 3){
                         //Small rewind
                         mplayer_put_key(KEY_LEFT);
+                        paused = 0;
                     }
                 }
 				else if(lastSwipeY > swipeThreshold){
 					if(buttonsDown > 2){
 						//Toggle subtitles
 						mplayer_put_key('v');
+                        paused = 0;
 					}
 				}
 				else if(lastSwipeY < -swipeThreshold){
 					if(buttonsDown > 2){
 						//Toggle subtitle track
 						mplayer_put_key('j');
+                        paused = 0;
 					}
 				}
                 else{
 					//The relative movement wasn't large enough to be detected
 					//as a swipe, treat this as a tap.
-					
 					//Toggle the paused variable
                     paused = (paused == 0) ? 1 : 0;
                     if(paused){
