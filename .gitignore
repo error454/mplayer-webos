@@ -5,7 +5,8 @@ codec-cfg
 codec-cfg-test
 codecs2html
 codecs.conf.h
-config.*
+config.h 
+config.mak
 cpuinfo
 gmplayer
 help_mp.h
