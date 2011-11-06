@@ -233,8 +233,10 @@ void guiInit(void)
 
     uiSubRender = 1;
 
-    if (plCurrent && !filename)
+    if (plCurrent && !filename) {
         uiSetFileName(plCurrent->path, plCurrent->name, STREAMTYPE_FILE);
+        filename = NULL; // don't start playing
+    }
 
     if (subdata)
         setdup(&guiInfo.SubtitleFilename, subdata->filename);
@@ -321,6 +323,7 @@ int gui(int what, void *data)
     dvd_priv_t *dvd;
 #endif
     plItem *next;
+    int state;
 
     if (guiInfo.mpcontext)
         mixer = mpctx_get_mixer(guiInfo.mpcontext);
@@ -344,29 +347,10 @@ int gui(int what, void *data)
         uiState();
         break;
 
-    case GUI_SET_FILE:
-
-// if ( guiInfo.Playing == 1 && guiInfo.NewPlay == GUI_FILE_NEW )
-        if (guiInfo.NewPlay == GUI_FILE_NEW) {
-            dvd_title = 0;
-            audio_id  = -1;
-            video_id  = -1;
-            dvdsub_id = -1;
-            vobsub_id = -1;
-
-            stream_cache_size = -1;
-            autosync  = 0;
-            force_fps = 0;
-        }
-
-        guiInfo.sh_video = NULL;
-        wsPostRedisplay(&guiApp.subWindow);
-
-        break;
-
     case GUI_HANDLE_EVENTS:
         if (!guiInfo.Playing || !guiInfo.VideoWindow)
             wsHandleEvents();
+        wsAutohideCursor();
         gtkEventHandling();
         break;
 
@@ -400,12 +384,23 @@ int gui(int what, void *data)
 
     case GUI_PREPARE:
 
-        gui(GUI_SET_FILE, 0);
-
         wsVisibleMouse(&guiApp.subWindow, wsHideMouseCursor);
 
+        if (guiInfo.NewPlay == GUI_FILE_NEW) {
+            dvd_title = 0;
+            audio_id  = -1;
+            video_id  = -1;
+            dvdsub_id = -1;
+            vobsub_id = -1;
+
+            stream_cache_size = -1;
+            autosync  = 0;
+            force_fps = 0;
+        }
+
         switch (guiInfo.StreamType) {
-        case STREAMTYPE_PLAYLIST:
+        case STREAMTYPE_FILE:
+        case STREAMTYPE_STREAM:
             break;
 
 #ifdef CONFIG_VCD
@@ -414,7 +409,7 @@ int gui(int what, void *data)
             char tmp[512];
 
             sprintf(tmp, "vcd://%d", guiInfo.Track);
-            setdup(&guiInfo.Filename, tmp);
+            uiSetFileName(NULL, tmp, STREAMTYPE_VCD);
         }
         break;
 #endif
@@ -425,7 +420,7 @@ int gui(int what, void *data)
             char tmp[512];
 
             sprintf(tmp, "dvd://%d", guiInfo.Track);
-            setdup(&guiInfo.Filename, tmp);
+            uiSetFileName(NULL, tmp, STREAMTYPE_DVD);
         }
 
             dvd_chapter = guiInfo.Chapter;
@@ -433,14 +428,6 @@ int gui(int what, void *data)
 
             break;
 #endif
-        }
-
-// if ( guiInfo.StreamType != STREAMTYPE_PLAYLIST ) // Does not make problems anymore!
-        {
-            if (guiInfo.Filename)
-                filename = gstrdup(guiInfo.Filename);
-            else if (filename)
-                setdup(&guiInfo.Filename, filename);
         }
 
         // video opts
@@ -617,6 +604,13 @@ int gui(int what, void *data)
         guiInfo.StreamType = stream->type;
 
         switch (guiInfo.StreamType) {
+#ifdef CONFIG_VCD
+        case STREAMTYPE_VCD:
+            guiInfo.Tracks = 0;
+            stream_control(stream, STREAM_CTRL_GET_NUM_CHAPTERS, &guiInfo.Tracks);
+            break;
+#endif
+
 #ifdef CONFIG_DVDREAD
         case STREAMTYPE_DVD:
             dvd = stream->priv;
@@ -630,13 +624,6 @@ int gui(int what, void *data)
             guiInfo.Track   = dvd_title + 1;
             guiInfo.Chapter = dvd_chapter + 1;
             guiInfo.Angle   = dvd_angle + 1;
-            break;
-#endif
-
-#ifdef CONFIG_VCD
-        case STREAMTYPE_VCD:
-            guiInfo.Tracks = 0;
-            stream_control(stream, STREAM_CTRL_GET_NUM_CHAPTERS, &guiInfo.Tracks);
             break;
 #endif
 
@@ -656,10 +643,14 @@ int gui(int what, void *data)
 
         guiInfo.sh_video = data;
 
-        if (guiInfo.StreamType == STREAMTYPE_STREAM)
-            btnSet(evSetMoviePosition, btnDisabled);
-        else
-            btnSet(evSetMoviePosition, btnReleased);
+        state = (guiInfo.StreamType == STREAMTYPE_STREAM ? btnDisabled : btnReleased);
+        btnSet(evForward10sec, state);
+        btnSet(evBackward10sec, state);
+        btnSet(evForward1min, state);
+        btnSet(evBackward1min, state);
+        btnSet(evForward10min, state);
+        btnSet(evBackward10min, state);
+        btnSet(evSetMoviePosition, state);
 
 #ifdef CONFIG_DXR3
         if (video_driver_list && !gstrcmp(video_driver_list[0], "dxr3") && (((demuxer_t *)mpctx_get_demuxer(guiInfo.mpcontext))->file_format != DEMUXER_TYPE_MPEG_PS) && !gtkVfLAVC) {
@@ -767,6 +758,8 @@ int gui(int what, void *data)
 
         uiEventHandling(evRedraw, 1);
 
+        guiInfo.sh_video = NULL;
+
         if (!uiGotoTheNext && guiInfo.Playing) {
             uiGotoTheNext = 1;
             break;
@@ -774,15 +767,14 @@ int gui(int what, void *data)
 
         if (guiInfo.Playing && (next = listSet(gtkGetNextPlItem, NULL)) && (plLastPlayed != next)) {
             plLastPlayed = next;
-            setddup(&guiInfo.Filename, next->path, next->name);
-            guiInfo.StreamType = STREAMTYPE_FILE;
-            guiInfo.NewPlay    = GUI_FILE_NEW;
-            nfree(guiInfo.AudioFilename);
-            nfree(guiInfo.SubtitleFilename);
+            uiSetFileName(next->path, next->name, STREAMTYPE_FILE);
+            guiInfo.NewPlay = GUI_FILE_NEW;
             guiInfo.Track++;
         } else {
             if (guiInfo.NewPlay == GUI_FILE_NEW)
                 break;
+
+            filename = NULL;
 
             guiInfo.ElapsedTime   = 0;
             guiInfo.Position      = 0;
@@ -885,18 +877,16 @@ int guiPlaylistInitialize(play_tree_t *my_playtree, m_config_t *config, int enqu
     uiCurr();   // update filename
     uiGotoTheNext = 1;
 
-    if (!enqueue)
-        filename = guiInfo.Filename;             // Backward compatibility; if file is specified on commandline,
-                                                 // gmplayer does directly start in Play-Mode.
-    else
-        filename = NULL;
+    if (enqueue)
+        filename = NULL;            // don't start playing
 
     return result;
 }
 
 // This function imports and inserts an playtree, that is created "on the fly",
 // for example by parsing some MOV-Reference-File; or by loading an playlist
-// with "File Open".
+// with "File Open". (The latter, actually, isn't allowed in MPlayer and thus
+// not working which is why this function won't get called for that reason.)
 // The file which contained the playlist is thereby replaced with it's contents.
 int guiPlaylistAdd(play_tree_t *my_playtree, m_config_t *config)
 {
@@ -924,7 +914,6 @@ int guiPlaylistAdd(play_tree_t *my_playtree, m_config_t *config)
         listSet(gtkDelCurrPlItem, NULL);
 
     uiCurr();   // update filename
-    filename = NULL;
 
     return result;
 }

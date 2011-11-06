@@ -22,7 +22,7 @@
  *
  * Modified for use with MPlayer, see libmpeg2_changes.diff for the exact changes.
  * detailed changelog at http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: mpeg2_internal.h 31395 2010-06-14 08:55:32Z lu_zero $
  */
 
 #ifndef LIBMPEG2_MPEG2_INTERNAL_H

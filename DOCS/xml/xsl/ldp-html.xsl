@@ -4,7 +4,7 @@
                 xmlns="http://www.w3.org/TR/xhtml1/transitional"
                 exclude-result-prefixes="#default">
 
-<!-- $Id$  -->
+<!-- $Id: ldp-html.xsl 29305 2009-05-13 02:58:57Z diego $  -->
 
 <!-- This stylesheet calls Norman Walsh's 'docbook.xsl' stylesheet
      and therefore generates a SINGLE HTML FILE as output. -->

@@ -22,7 +22,7 @@
  *
  * Modified for use with MPlayer, see libmpeg2_changes.diff for the exact changes.
  * detailed changelog at http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: cpu_accel.c 29306 2009-05-13 15:22:13Z bircoph $
  */
 
 #include "config.h"

@@ -49,7 +49,6 @@ enum {
     GUI_SET_AFILTER,
     GUI_SET_AUDIO,
     GUI_SET_CONTEXT,
-    GUI_SET_FILE,
     GUI_SET_MIXER,
     GUI_SET_STATE,
     GUI_SET_STREAM,
@@ -99,7 +98,7 @@ typedef struct {
     int VideoWidth;
     int VideoHeight;
 
-    int StreamType;           // public, read access by MPlayer
+    int StreamType;
     int AudioChannels;
 
 #ifdef CONFIG_DVDREAD

@@ -23,6 +23,16 @@ include config.mak
 
 ###### variable declarations #######
 
+# local fallbacks for missing operating system features
+OS_FEATURE-$(GETTIMEOFDAY)           += osdep/gettimeofday.c
+OS_FEATURE-$(GLOB_WIN)               += osdep/glob-win.c
+OS_FEATURE-$(MMAP)                   += osdep/mmap-os2.c
+OS_FEATURE-$(SETENV)                 += osdep/setenv.c
+OS_FEATURE-$(SHMEM)                  += osdep/shmem.c
+OS_FEATURE-$(STRSEP)                 += osdep/strsep.c
+OS_FEATURE-$(VSSCANF)                += osdep/vsscanf.c
+
+# conditional source declarations
 SRCS_AUDIO_INPUT-$(ALSA1X)           += stream/ai_alsa1x.c
 SRCS_AUDIO_INPUT-$(ALSA9)            += stream/ai_alsa.c
 SRCS_AUDIO_INPUT-$(OSS)              += stream/ai_oss.c
@@ -63,6 +73,7 @@ SRCS_COMMON-$(FFMPEG)                += av_helpers.c                \
                                         av_opts.c                   \
                                         libaf/af_lavcresample.c     \
                                         libmpcodecs/ad_ffmpeg.c     \
+                                        libmpcodecs/ad_spdif.c      \
                                         libmpcodecs/vd_ffmpeg.c     \
                                         libmpcodecs/vf_geq.c        \
                                         libmpcodecs/vf_lavc.c       \
@@ -72,6 +83,8 @@ SRCS_COMMON-$(FFMPEG)                += av_helpers.c                \
                                         libmpdemux/demux_lavf.c     \
                                         stream/stream_ffmpeg.c      \
                                         sub/av_sub.c                \
+
+SRCS_COMMON-$(CONFIG_VF_LAVFI)      +=  libmpcodecs/vf_lavfi.c
 
 # These filters use private headers and do not work with shared FFmpeg.
 SRCS_COMMON-$(FFMPEG_A)              += libaf/af_lavcac3enc.c    \
@@ -177,13 +190,6 @@ SRCS_COMMON-$(NATIVE_RTSP)           += stream/stream_rtsp.c \
                                         stream/librtsp/rtsp_rtp.c \
                                         stream/librtsp/rtsp_session.c \
 
-SRCS_COMMON-$(NEED_GETTIMEOFDAY)     += osdep/gettimeofday.c
-SRCS_COMMON-$(NEED_GLOB)             += osdep/glob-win.c
-SRCS_COMMON-$(NEED_MMAP)             += osdep/mmap-os2.c
-SRCS_COMMON-$(NEED_SETENV)           += osdep/setenv.c
-SRCS_COMMON-$(NEED_SHMEM)            += osdep/shmem.c
-SRCS_COMMON-$(NEED_STRSEP)           += osdep/strsep.c
-SRCS_COMMON-$(NEED_VSSCANF)          += osdep/vsscanf.c
 SRCS_COMMON-$(NETWORKING)            += stream/stream_netstream.c \
                                         stream/asf_mmst_streaming.c \
                                         stream/asf_streaming.c \
@@ -484,7 +490,8 @@ SRCS_COMMON = asxparser.c \
               sub/sub_cc.c \
               sub/subreader.c \
               sub/vobsub.c \
-              $(SRCS_COMMON-yes)
+              $(SRCS_COMMON-yes) \
+              $(OS_FEATURE-no)
 
 
 SRCS_MPLAYER-$(3DFX)         += libvo/vo_3dfx.c
@@ -684,7 +691,7 @@ SRCS_MENCODER = mencoder.c \
                 $(SRCS_MENCODER-yes)
 
 # (linking) order matters for these libraries
-FFMPEGPARTS = libpostproc libswscale libavformat libavcodec libavutil
+FFMPEGPARTS = libpostproc libswscale libavfilter libavformat libavcodec libavutil
 FFMPEGLIBS  = $(foreach part, $(FFMPEGPARTS), ffmpeg/$(part)/$(part).a)
 FFMPEGFILES = $(foreach part, $(FFMPEGPARTS), $(wildcard $(addprefix ffmpeg/$(part)/,*.[chS] /*/*.[chS] /*/*.asm)))
 
@@ -772,7 +779,7 @@ all: $(ALL_PRG-yes)
 	$(CC) $(CC_DEPFLAGS) $(CFLAGS) -c -o $@ $<
 
 %-rc.o: %.rc
-	$(WINDRES) -I. $< $@
+	$(WINDRES) -I. $< -o $@
 
 $(FFMPEGLIBS): $(FFMPEGFILES) config.h
 	$(MAKE) -C ffmpeg $(@:ffmpeg/%=%)

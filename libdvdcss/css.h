@@ -2,7 +2,7 @@
  * css.h: Structures for DVD authentication and unscrambling
  *****************************************************************************
  * Copyright (C) 1999-2001 VideoLAN
- * $Id$
+ * $Id: css.h 32349 2010-09-25 15:53:03Z diego $
  *
  * Author: Stéphane Borel <stef@via.ecp.fr>
  *

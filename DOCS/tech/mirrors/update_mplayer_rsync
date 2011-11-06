@@ -1,6 +1,6 @@
 #!/bin/sh
 # MPlayer mirroring script
-# $Id$
+# $Id: update_mplayer_rsync 30838 2010-03-04 15:57:21Z diego $
 
 PATH=<set_path_if_necessary>
 LOCK=<path_to_lockfile>

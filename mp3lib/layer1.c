@@ -11,7 +11,7 @@
 /*
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: layer1.c 31032 2010-04-12 10:56:17Z diego $
  *
  * The above-mentioned README file has the following to say about licensing:
  *

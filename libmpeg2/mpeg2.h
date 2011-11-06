@@ -22,7 +22,7 @@
  *
  * Modified for use with MPlayer, see libmpeg2_changes.diff for the exact changes.
  * detailed changelog at http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: mpeg2.h 27677 2008-10-01 01:01:59Z diego $
  */
 
 #ifndef LIBMPEG2_MPEG2_H

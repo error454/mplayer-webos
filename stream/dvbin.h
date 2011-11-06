@@ -2,7 +2,7 @@
  *
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: dvbin.h 31516 2010-06-21 14:39:24Z diego $
  */
 
 #ifndef MPLAYER_DVBIN_H

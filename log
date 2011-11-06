@@ -1,0 +1,4 @@
+make -C ffmpeg libswscale/libswscale.a
+make[1]: Entering directory `/home/error454/projects/webos/mplayer-webos/mplayer/ffmpeg'
+CC	libswscale/swscale.o
+make[1]: Leaving directory `/home/error454/projects/webos/mplayer-webos/mplayer/ffmpeg'

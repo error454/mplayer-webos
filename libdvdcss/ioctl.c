@@ -2,7 +2,7 @@
  * ioctl.c: DVD ioctl replacement function
  *****************************************************************************
  * Copyright (C) 1999-2001 VideoLAN
- * $Id$
+ * $Id: ioctl.c 31155 2010-05-11 10:51:46Z diego $
  *
  * Authors: Markus Kuespert <ltlBeBoy@beosmail.com>
  *          Sam Hocevar <sam@zoy.org>

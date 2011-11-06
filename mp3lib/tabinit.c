@@ -1,7 +1,7 @@
 /*
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: tabinit.c 30675 2010-02-20 21:02:49Z diego $
  */
 
 #include "mpg123.h"

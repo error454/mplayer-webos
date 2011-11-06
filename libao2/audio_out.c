@@ -31,7 +31,6 @@
 ao_data_t ao_data={0,0,0,0,OUTBURST,-1,0};
 char *ao_subdevice = NULL;
 
-extern const ao_functions_t audio_out_sdl;
 extern const ao_functions_t audio_out_oss;
 extern const ao_functions_t audio_out_coreaudio;
 extern const ao_functions_t audio_out_arts;
@@ -43,6 +42,7 @@ extern const ao_functions_t audio_out_null;
 extern const ao_functions_t audio_out_alsa5;
 extern const ao_functions_t audio_out_alsa;
 extern const ao_functions_t audio_out_nas;
+extern const ao_functions_t audio_out_sdl;
 extern const ao_functions_t audio_out_sun;
 extern const ao_functions_t audio_out_sgi;
 extern const ao_functions_t audio_out_win32;

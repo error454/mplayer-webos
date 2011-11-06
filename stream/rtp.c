@@ -2,7 +2,7 @@
  *
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: rtp.c 29305 2009-05-13 02:58:57Z diego $
  */
 
 #include <stdlib.h>

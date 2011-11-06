@@ -859,7 +859,7 @@ static void parse_cfgfiles(m_config_t *conf)
     char *conffile;
     int conffile_fd;
     if (!disable_system_conf &&
-        m_config_parse_config_file(conf, MPLAYER_CONFDIR "/mplayer.conf") < 0)
+        m_config_parse_config_file(conf, MPLAYER_CONFDIR "/mplayer.conf", 1) < 0)
         exit_player(EXIT_NONE);
     if ((conffile = get_path("")) == NULL) {
         mp_msg(MSGT_CPLAYER, MSGL_WARN, MSGTR_NoHomeDir);
@@ -879,7 +879,7 @@ static void parse_cfgfiles(m_config_t *conf)
                 close(conffile_fd);
             }
             if (!disable_user_conf &&
-                m_config_parse_config_file(conf, conffile) < 0)
+                m_config_parse_config_file(conf, conffile, 1) < 0)
                 exit_player(EXIT_NONE);
             free(conffile);
         }
@@ -956,7 +956,7 @@ static int try_load_config(m_config_t *conf, const char *file)
     if (stat(file, &st))
         return 0;
     mp_msg(MSGT_CPLAYER, MSGL_INFO, MSGTR_LoadingConfig, file);
-    m_config_parse_config_file(conf, file);
+    m_config_parse_config_file(conf, file, 0);
     return 1;
 }
 
@@ -988,6 +988,17 @@ static void load_per_file_config(m_config_t *conf, const char *const file)
 
         free(confpath);
     }
+}
+
+static int load_profile_config(m_config_t *conf, const char *const file)
+{
+    if (file) {
+        load_per_protocol_config(conf, file);
+        load_per_extension_config(conf, file);
+        load_per_file_config(conf, file);
+    }
+
+    return file != NULL;
 }
 
 /* When libmpdemux performs a blocking operation (network connection or
@@ -2719,6 +2730,7 @@ static int seek(MPContext *mpctx, double amount, int style)
 int main(int argc, char *argv[])
 {
     int opt_exit = 0; // Flag indicating whether MPlayer should exit without playing anything.
+    int profile_config_loaded;
     int i;
 
     common_preinit();
@@ -2801,7 +2813,7 @@ int main(int argc, char *argv[])
 #endif
     if (use_gui && mpctx->playtree_iter) {
         char cwd[PATH_MAX + 2];
-        // Free Playtree and Playtree-Iter as it's not used by the GUI.
+        // Free playtree_iter as it's not used in connection with the GUI.
         play_tree_iter_free(mpctx->playtree_iter);
         mpctx->playtree_iter = NULL;
 
@@ -2990,7 +3002,9 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_SIGHANDLER
     // fatal errors:
     signal(SIGBUS, exit_sighandler); // bus error
+#ifndef __WINE__                      // hack: the Wine executable will crash else
     signal(SIGSEGV, exit_sighandler); // segfault
+#endif
     signal(SIGILL, exit_sighandler); // illegal instruction
     signal(SIGFPE, exit_sighandler); // floating point exc.
     signal(SIGABRT, exit_sighandler); // abort()
@@ -3016,11 +3030,7 @@ play_next_file:
     mpctx->global_sub_size = 0;
     memset(mpctx->sub_counts, 0, sizeof(mpctx->sub_counts));
 
-    if (filename) {
-        load_per_protocol_config(mconfig, filename);
-        load_per_extension_config(mconfig, filename);
-        load_per_file_config(mconfig, filename);
-    }
+    profile_config_loaded = load_profile_config(mconfig, filename);
 
     if (video_driver_list)
         load_per_output_config(mconfig, PROFILE_CFG_VO, video_driver_list[0]);
@@ -3042,7 +3052,6 @@ play_next_file:
 #ifdef CONFIG_GUI
     if (use_gui) {
         mpctx->file_format = DEMUXER_TYPE_UNKNOWN;
-        gui(GUI_SET_FILE, 0);
         while (guiInfo.Playing != GUI_PLAY) {
             mp_cmd_t *cmd;
             usec_sleep(20000);
@@ -3054,25 +3063,6 @@ play_next_file:
             }
         }
         gui(GUI_PREPARE, 0);
-        if (guiInfo.StreamType == STREAMTYPE_STREAM) {
-            play_tree_t *entry = play_tree_new();
-            play_tree_add_file(entry, guiInfo.Filename);
-            if (mpctx->playtree)
-                play_tree_free_list(mpctx->playtree->child, 1);
-            else
-                mpctx->playtree = play_tree_new();
-            play_tree_set_child(mpctx->playtree, entry);
-            if (mpctx->playtree) {
-                mpctx->playtree_iter = play_tree_iter_new(mpctx->playtree, mconfig);
-                if (mpctx->playtree_iter) {
-                    if (play_tree_iter_step(mpctx->playtree_iter, 0, 0) != PLAY_TREE_ITER_ENTRY) {
-                        play_tree_iter_free(mpctx->playtree_iter);
-                        mpctx->playtree_iter = NULL;
-                    }
-                    filename = play_tree_iter_get_file(mpctx->playtree_iter, 1);
-                }
-            }
-        }
     }
 #endif /* CONFIG_GUI */
 
@@ -3135,6 +3125,8 @@ play_next_file:
             filename = play_tree_iter_get_file(mpctx->playtree_iter, 1);
         }
     }
+
+    if (!profile_config_loaded) load_profile_config(mconfig, filename);
 //---------------------------------------------------------------------------
 
     if (mpctx->video_out && vo_config_count)
@@ -4060,7 +4052,7 @@ goto_next_file:  // don't jump here after ao/vo/getch initialization!
         (use_gui && guiInfo.Playing) ||
 #endif
                                         mpctx->playtree_iter != NULL || player_idle_mode) {
-        if (!mpctx->playtree_iter)
+        if (!mpctx->playtree_iter && !use_gui)
             filename = NULL;
         mpctx->eof = 0;
         goto play_next_file;

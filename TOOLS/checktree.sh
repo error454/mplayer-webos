@@ -23,7 +23,7 @@
 # Thanks to Melchior Franz of the FlightGear project for the original idea
 # of a source-tree checker and Torinthiel for the feedback along the way.
 
-# $Id$
+# $Id: checktree.sh 31415 2010-06-14 15:17:48Z diego $
 
 # -----------------------------------------------------------------------------
 

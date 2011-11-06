@@ -1,7 +1,7 @@
 /*
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: l2tables.h 31032 2010-04-12 10:56:17Z diego $
  */
 
 #ifndef MPLAYER_MP3LIB_L2TABLES_H

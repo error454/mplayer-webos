@@ -1,7 +1,7 @@
 /*
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: decode_i586.c 31032 2010-04-12 10:56:17Z diego $
  */
 
 /*
@@ -27,7 +27,7 @@
 *
 * Stefan Bieschewski <stb@acm.org>
 *
-* $Id$
+* $Id: decode_i586.c 31032 2010-04-12 10:56:17Z diego $
 */
 #include "config.h"
 #include "mangle.h"

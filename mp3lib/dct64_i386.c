@@ -1,7 +1,7 @@
 /*
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id$
+ * $Id: dct64_i386.c 18786 2006-06-22 13:34:00Z diego $
  */
 
 /*

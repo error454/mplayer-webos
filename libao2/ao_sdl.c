@@ -197,7 +197,7 @@ void callback(void *userdata, Uint8 *stream, int len); userdata is the pointer s
 	aspec.userdata = NULL;
 
 	/* initialize the SDL Audio system */
-        if (SDL_Init (SDL_INIT_AUDIO|SDL_INIT_VIDEO)) {
+        if (SDL_Init (SDL_INIT_AUDIO/*|SDL_INIT_NOPARACHUTE*/)) {
                 mp_msg(MSGT_AO,MSGL_ERR,MSGTR_AO_SDL_CantInit, SDL_GetError());
                 return 0;
         }
